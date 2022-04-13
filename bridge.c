@@ -22,21 +22,29 @@
     }                         \
   } while (0)
 
+#define NON_BLOCKING 1
+
 void help() {
   printf("Usage: sudo ./bridge.c <interface_1> <interface_2>\n");
 }
 void forward(pcap_t *from, pcap_t *to);
 
+pcap_t *i1, *i2;
+void closeHandlers(){
+  pcap_close(i1);
+  pcap_close(i2);
+}
+
 int main(int argc, const char **argv) {
   char *device = NULL, c, *bpfFilter = NULL;
   char errbuf[PCAP_ERRBUF_SIZE];
   int promisc = 1, snaplen = 1500;  // TODO get actual mtu dynamically
-  pcap_t *i1, *i2;
 
   if (argc != 3) {
     help();
     return -1;
   }
+
 
   // capture packets from the two interfaces
   ec(i1 = pcap_open_live(argv[1], snaplen, promisc, 500, errbuf), ==, NULL,
@@ -50,9 +58,15 @@ int main(int argc, const char **argv) {
   ec(pcap_setdirection(i1, PCAP_D_IN), !=, 0, pcap_perror(i1, argv[1]); return -1;);
   ec(pcap_setdirection(i2, PCAP_D_IN), !=, 0, pcap_perror(i2, argv[2]); return -1;);
 
+  // non-blocking policy
+  ec(pcap_setnonblock(i1,NON_BLOCKING,errbuf), !=, 0,pcap_perror(i1, argv[1]); return -1;);
+  ec(pcap_setnonblock(i2,NON_BLOCKING,errbuf), !=, 0,pcap_perror(i2, argv[2]); return -1;);
+
+  atexit(closeHandlers);
+
   int res,
-      fd1 = pcap_fileno(i1),
-      fd2 = pcap_fileno(i2),
+      fd1 = pcap_get_selectable_fd(i1),
+      fd2 = pcap_get_selectable_fd(i2),
       fd_max = fd1 > fd2 ? fd1 : fd2;
   ;
 
@@ -66,10 +80,14 @@ int main(int argc, const char **argv) {
     FD_SET(fd1, &mask);
     FD_SET(fd2, &mask);
     if (select(fd_max + 1, &mask, NULL, NULL, &timeout)) {
-      if (FD_ISSET(fd1, &mask))
+      if (FD_ISSET(fd1, &mask)){
+        // printf("forwarding from %s to %s\n", argv[1], argv[2]);
         forward(i1, i2);
-      if (FD_ISSET(fd2, &mask))
+      }
+      if (FD_ISSET(fd2, &mask)){
+        // printf("forwarding from %s to %s\n", argv[2], argv[1]);
         forward(i2, i1);
+      }
     }
   }
 
@@ -88,7 +106,7 @@ void forward(pcap_t *from, pcap_t *to) {
   int res;
   if ((res = pcap_next_ex(from, &header, &pkt_data)) != 1) {
     if (res == 0)
-      printf("pcap_next: timeout %s\n", );
+      printf("pcap_next: timeout %s\n", pcap_datalink_val_to_description(pcap_datalink(from)));
     else
       printf("pcap_next: some error\n");
   } else {
