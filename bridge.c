@@ -1,25 +1,31 @@
 /**
  * @file bridge.c
  * @author your name (you@domain.com)
- * @brief usage: 
+ * @brief usage:
  *  gcc bridge.c -o bridge -lpcap
  *  bridge enp2s0f1 wlp3s0
  * @version 0.1
  * @date 2022-04-13
- * 
+ *
  * @copyright Copyright (c) 2022
- * 
+ *
  */
 #include <pcap/pcap.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/select.h>
 
+#define ec(cmd, op, arg, err) \
+  do {                        \
+    if ((cmd)op(arg)) {       \
+      err;                    \
+    }                         \
+  } while (0)
+
 void help() {
   printf("Usage: sudo ./bridge.c <interface_1> <interface_2>\n");
 }
 void forward(pcap_t *from, pcap_t *to);
-
 
 int main(int argc, const char **argv) {
   char *device = NULL, c, *bpfFilter = NULL;
@@ -32,16 +38,17 @@ int main(int argc, const char **argv) {
     return -1;
   }
 
-  if ((i1 = pcap_open_live(argv[1], snaplen,
-                           promisc, 500, errbuf)) == NULL) {
-    printf("pcap_open_live: %s\n", errbuf);
-    return (-1);
-  }
-  if ((i2 = pcap_open_live(argv[2], snaplen,
-                           promisc, 500, errbuf)) == NULL) {
-    printf("pcap_open_live: %s\n", errbuf);
-    return (-1);
-  }
+  // capture packets from the two interfaces
+  ec(i1 = pcap_open_live(argv[1], snaplen, promisc, 500, errbuf), ==, NULL,
+     printf("pcap_open_live: %s\n", errbuf);
+     return (-1););
+  ec(i2 = pcap_open_live(argv[2], snaplen, promisc, 500, errbuf), ==, NULL,
+     printf("pcap_open_live: %s\n", errbuf);
+     return (-1););
+
+  // capture only incoming packets
+  ec(pcap_setdirection(i1, PCAP_D_IN), !=, 0, pcap_perror(i1, argv[1]); return -1;);
+  ec(pcap_setdirection(i2, PCAP_D_IN), !=, 0, pcap_perror(i2, argv[2]); return -1;);
 
   int res,
       fd1 = pcap_fileno(i1),
@@ -81,14 +88,14 @@ void forward(pcap_t *from, pcap_t *to) {
   int res;
   if ((res = pcap_next_ex(from, &header, &pkt_data)) != 1) {
     if (res == 0)
-      printf("pcap_next: timeout\n");
+      printf("pcap_next: timeout %s\n", );
     else
       printf("pcap_next: some error\n");
   } else {
-    printf("pcap_next: ok\n");
+    // printf("pcap_next: ok\n");
     if ((res = pcap_sendpacket(to, pkt_data, header->caplen)) != 0)
       printf("pcap_send: some error\n");
-    else
-      printf("pcap_send: ok\n");
+    // else
+    // printf("pcap_send: ok\n");
   }
 }
